@@ -75,38 +75,53 @@ const Client = struct {
     handle_frame: @Frame(Client.handle),
 
     fn handle(self: *Client) !void {
+        var list = std.ArrayList(u8).init(self.allocator);
+        defer list.deinit();
         while (true) {
-            var buffer1: [1024]u8 = undefined;
-            const count = try self.socket.receive(&buffer1);
-            if (count == 0) {
-                break; // end of connection
-            }
-            const request = buffer1[0..count];
-            print("received...\n{}", .{request});
-
-            var buffer2: [256]u8 = undefined;
-            const path = try parsePath(&buffer2, request);
-            print("\npath={}\n", .{path});
-
-            var content: []const u8 = undefined;
-            var response: []const u8 = undefined;
-            if (eql(u8, path, "/favicon.ico")) {
-                content = try getFavicon(self.allocator);
-                response = try makeResponse(self.allocator, "200 OK", "image/png", content);
-            } else if (eql(u8, path, "/")) {
-                content = try getIndexHtml(self.allocator);
-                response = try makeResponse(self.allocator, "200 OK", "text/html", content);
-            } else {
-                content = try get404Html(self.allocator);
-                response = try makeResponse(self.allocator, "404 NOT FOUND", "text/html", content);
-            }
-            defer self.allocator.free(content);
-            defer self.allocator.free(response);
-
-            // print("\nsending...\n{}", .{response});
-            _ = try self.socket.send(response);
-            break;
+            const bufferSize: u32 = 1024;
+            var buffer: [bufferSize]u8 = undefined;
+            // this is a blocking read...
+            // when count is less than buffer size (or 0) read is complete.
+            // FIXME: receive will never return 0 after a bufferSize read!!!
+            // FIXME: use curl http://127.0.0.1:8080 to get size of request and change bufferSize
+            const count = try self.socket.receive(&buffer);
+            // print("received: count={}\n", .{count});
+            try list.appendSlice(buffer[0..count]);
+            if (count < bufferSize) break;
         }
+        const request = list.items[0..];
+        // print("request.len={}\n", .{request.len});
+        // print("request is {}\n", .{@typeName(@TypeOf(request))});
+        print("received...\n{}", .{request});
+
+        var buffer2: [256]u8 = undefined;
+        const path = try parsePath(&buffer2, request);
+        print("\npath={}\n", .{path});
+
+        var content: []const u8 = undefined;
+        var response: []const u8 = undefined;
+        if (eql(u8, path, "/favicon.ico")) {
+            content = try getFavicon(self.allocator);
+            response = try makeResponse(self.allocator, "200 OK", "image/png", content);
+        } else if (eql(u8, path, "/")) {
+            content = try get302Html(self.allocator);
+            response = try makeResponse(self.allocator, "302 FOUND", "text/html", content);
+        } else if (eql(u8, path, "/index.html")) {
+            content = try getIndexHtml(self.allocator);
+            response = try makeResponse(self.allocator, "200 OK", "text/html", content);
+        } else if (eql(u8, path, "/index.css")) {
+            content = try getIndexCss(self.allocator);
+            response = try makeResponse(self.allocator, "200 OK", "text/css", content);
+        } else {
+            content = try get404Html(self.allocator);
+            response = try makeResponse(self.allocator, "404 NOT FOUND", "text/html", content);
+        }
+        defer self.allocator.free(content);
+        defer self.allocator.free(response);
+
+        // print("\nsending...\n{}", .{response});
+        _ = try self.socket.send(response);
+
         self.socket.close();
     }
 };
@@ -124,23 +139,62 @@ fn parsePath(buffer: []u8, request: []u8) ![]u8 {
 
 fn makeResponse(allocator: *Allocator, code: []const u8, mimeType: []const u8, content: []const u8) ![]const u8 {
     const aprint = std.fmt.allocPrint;
+    const ts = timestamp.Timestamp.now();
     const header1 = try aprint(allocator, "HTTP/1.1 {}", .{code});
     defer allocator.free(header1);
-    const header2 = try aprint(allocator, "Content-Type:  {}", .{mimeType});
+    // const header2 = try aprint(allocator, "Date: {}", .{std.time.milliTimestamp()});
+    const header2 = try aprint(allocator, "Date: {}-{}-{}T{}:{}:{}", .{ ts.year, ts.month, ts.day, ts.hours, ts.minutes, ts.seconds });
     defer allocator.free(header2);
-    const header3 = try aprint(allocator, "Content-Length:  {}", .{content.len});
+    const header3 = try aprint(allocator, "Content-Type: {}", .{mimeType});
     defer allocator.free(header3);
-    const lines = &[_][]const u8{
-        header1,
-        "Server: zig/" ++ compiler.version(),
-        "Date: Mon, 02 Jan 2012 02:33:17 GMT",
-        header2,
-        header3,
-        "Connection: close",
-        "",
-        content,
-    };
-    return try std.mem.join(allocator, "\r\n", lines);
+    const header4 = try aprint(allocator, "Content-Length: {}", .{content.len});
+    defer allocator.free(header4);
+    if (startsWith(u8, code, "302 ")) {
+        const header5 = try aprint(allocator, "Location: /index.html", .{});
+        defer allocator.free(header5);
+        const lines = &[_][]const u8{
+            header1,
+            "Server: zig/" ++ compiler.version(),
+            header2,
+            header3,
+            header4,
+            header5,
+            "Connection: close",
+            "",
+            content,
+        };
+        return try std.mem.join(allocator, "\r\n", lines);
+    } else {
+        const lines = &[_][]const u8{
+            header1,
+            "Server: zig/" ++ compiler.version(),
+            header2,
+            header3,
+            header4,
+            "Connection: close",
+            "",
+            content,
+        };
+        return try std.mem.join(allocator, "\r\n", lines);
+    }
+}
+
+fn get302Html(allocator: *Allocator) ![]const u8 {
+    const template =
+        \\<html>
+        \\<head>
+        \\  <title>302 Found</title>
+        \\</head>
+        \\<body bgcolor="white">
+        \\  <center><h1>302 Found</h1></center>
+        \\  <hr>
+        \\  <center>Zig/{}</center>
+        \\  <center><a href="/index.html">index.html</a></center>
+        \\</body>
+        \\</html>
+    ; // end string
+    const html = std.fmt.allocPrint(allocator, template, .{compiler.version()});
+    return html;
 }
 
 fn get404Html(allocator: *Allocator) ![]const u8 {
@@ -176,6 +230,14 @@ fn getIndexHtml(allocator: *Allocator) ![]const u8 {
     return content;
 }
 
+fn getIndexCss(allocator: *Allocator) ![]const u8 {
+    const bytes = @embedFile("./web/index.css");
+    // @compileLog(bytes);
+    const content = try allocator.alloc(u8, bytes.len);
+    std.mem.copy(u8, content, bytes);
+    return content;
+}
+
 // imports
 const std = @import("std");
 const print = std.debug.print;
@@ -184,3 +246,4 @@ const eql = std.mem.eql;
 const startsWith = std.mem.startsWith;
 const network = @import("20200909_zig-network.zig");
 const compiler = @import("version.zig");
+const timestamp = @import("timestamp.zig");
