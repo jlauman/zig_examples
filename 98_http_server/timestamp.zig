@@ -6,17 +6,21 @@ pub const Timestamp = struct {
     hours: u8 = 0,
     minutes: u8 = 0,
     seconds: u8 = 0,
+    month_name: []const u8 = undefined,
+    day_name: []const u8 = undefined,
+    month_name_array: []const []const u8 = &[_][]const u8{ "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" },
+    day_name_array: []const []const u8 = &[_][]const u8{ "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" },
 
-    pub fn now() Timestamp {
+    pub fn now() !Timestamp {
         var ts = Timestamp{};
         const ms = std.time.milliTimestamp();
-        fillTimestampFromMs(&ts, ms);
+        try initFromMs(&ts, ms);
         return ts;
     }
 
-    pub fn milliseconds(ms: i64) Timestamp {
+    pub fn milliseconds(ms: i64) !Timestamp {
         var ts = Timestamp{};
-        fillTimestampFromMs(&ts, ms);
+        try initFromMs(&ts, ms);
         return ts;
     }
 
@@ -27,7 +31,18 @@ pub const Timestamp = struct {
         return false;
     }
 
-    pub fn fillTimestampFromMs(ts: *Timestamp, ms: i64) void {
+    pub fn dayOfWeek(ts: *Timestamp) []const u8 {
+        const t: [12]u8 = .{ 0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4 };
+        const d = ts.day;
+        const m = ts.month;
+        const y = if (m < 3) ts.year - 1 else ts.year;
+        const i: u32 = (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7;
+        // std.debug.print("dayOfWeek: i={}\n", .{i});
+        return ts.day_name_array[i];
+    }
+
+    fn initFromMs(ts: *Timestamp, ms: i64) !void {
+        if (ms < 0) return error.BadValue;
         const base_days_per_month = [_]i64{
             31, // January
             28, // February (29 days on leap year)
@@ -43,19 +58,24 @@ pub const Timestamp = struct {
             31, // December
         };
 
-        // const ms = if (unix_ms < 0) -1 * unix_ms else unix_ms;
         // std.debug.print("\n", .{});
         const days = @divFloor(ms, std.time.ms_per_day);
-        // const abs_days = if (days < 0) -1 * days else days;
         // std.debug.print("days={}\n", .{days});
         var year0 = @floatToInt(i64, @intToFloat(f32, days) / 365.25);
         // std.debug.print("year0={}\n", .{year0});
-        var days_remaining = days - @floatToInt(i64, @intToFloat(f32, year0) * 365.25);
+        // var days_remaining = days - @floatToInt(i64, @intToFloat(f32, year0) * 365.25);
+        // above formula doesn't work... brute force loop subtract days in each year
+        var days_remaining = days;
+        var y: i64 = 0;
+        while (y < year0) : (y += 1) {
+            if (ts.isYearLeapYear(1970 + y)) days_remaining -= 366 else days_remaining -= 365;
+        }
         var month0: i64 = 0;
         for (base_days_per_month) |value, i| {
             // add one day to february if this year is a leap year
-            const year = if (days < 0) 1969 - year0 else 1970 + year0;
+            const year = 1970 + year0;
             const days_per_month = if (i == 1 and ts.isYearLeapYear(year)) value + 1 else value;
+            // std.debug.print("days_per_month[{}]={}\n", .{ i, days_per_month });
             if (days_per_month > days_remaining) break;
             days_remaining -= days_per_month;
             month0 += 1;
@@ -71,21 +91,36 @@ pub const Timestamp = struct {
         // std.debug.print("seconds={}\n", .{seconds});
 
         ts.unix_ms = ms;
-        ts.year = if (days < 0) 1969 - @intCast(u16, year0) else 1970 + @intCast(u16, year0);
+        ts.year = 1970 + @intCast(u16, year0);
         ts.month = @intCast(u8, month0) + 1;
         ts.day = @intCast(u8, day0) + 1;
         ts.hours = @intCast(u8, hours);
         ts.minutes = @intCast(u8, minutes);
         ts.seconds = @intCast(u8, seconds);
+        ts.month_name = ts.month_name_array[@intCast(usize, month0)];
+        ts.day_name = ts.dayOfWeek();
+    }
+
+    pub fn asctime(ts: *Timestamp, buffer: []u8) ![]u8 {
+        return std.fmt.bufPrint(buffer, "{}, {d:0>2} {} {d:0>4} {d:0>2}:{d:0>2}:{d:0>2} GMT", .{
+            ts.day_name,
+            ts.day,
+            ts.month_name,
+            ts.year,
+            ts.hours,
+            ts.minutes,
+            ts.seconds,
+        });
     }
 };
 
 test "leap year calculation" {
     const expect = std.testing.expect;
-    var ts = Timestamp.now();
+    var ts = try Timestamp.now();
     expect(ts.isYearLeapYear(1900) == false);
     expect(ts.isYearLeapYear(1992) == true);
     expect(ts.isYearLeapYear(2000) == true);
+    expect(ts.isYearLeapYear(2001) == false);
     expect(ts.isYearLeapYear(2019) == false);
     expect(ts.isYearLeapYear(2020) == true);
     expect(ts.isYearLeapYear(2021) == false);
@@ -94,16 +129,20 @@ test "leap year calculation" {
     expect(ts.isYearLeapYear(2400) == true);
 }
 
-test "unixtimestamp 0 is 1970-01-01T00:00:00 (UTC)" {
+test "unixtimestamp 0 is 1970-01-01T00:00:00 UTC" {
     const expect = std.testing.expect;
     const ms: i64 = 0;
-    var ts = Timestamp.milliseconds(ms);
+    var ts = try Timestamp.milliseconds(ms);
     expect(ts.year == 1970);
     expect(ts.month == 1);
     expect(ts.day == 1);
     expect(ts.hours == 0);
     expect(ts.minutes == 0);
     expect(ts.seconds == 0);
+    var buffer: [32]u8 = undefined;
+    const asctime: []u8 = try ts.asctime(buffer[0..]);
+    std.debug.print("asctime={}\n", .{asctime});
+    expect(std.mem.eql(u8, asctime, "Thu, 01 Jan 1970 00:00:00 GMT"));
 }
 
 // test "unixtimestamp -2208988800 is 1900-01-01T00:00:00 (UTC)" {
@@ -125,16 +164,55 @@ test "unixtimestamp 0 is 1970-01-01T00:00:00 (UTC)" {
 //     expect(ts.day == 14);
 // }
 
-test "timestamp 1600000000 is 2020-09-13T12:26:40 (UTC)" {
+test "unix time 1000000000 is 2001-09-09T01:46:40 UTC" {
+    const expect = std.testing.expect;
+    const ms: i64 = 1000000000 * std.time.ms_per_s;
+    var ts = try Timestamp.milliseconds(ms);
+    expect(ts.year == 2001);
+    expect(ts.month == 9);
+    expect(ts.day == 9);
+    expect(ts.hours == 1);
+    expect(ts.minutes == 46);
+    expect(ts.seconds == 40);
+    expect(std.mem.eql(u8, ts.day_name, "Sun"));
+    var buffer: [32]u8 = undefined;
+    const asctime: []u8 = try ts.asctime(buffer[0..]);
+    std.debug.print("asctime={}\n", .{asctime});
+    expect(std.mem.eql(u8, asctime, "Sun, 09 Sep 2001 01:46:40 GMT"));
+}
+
+test "unix time 1234567890 is 2009-02-13T23:31:30 UTC" {
+    const expect = std.testing.expect;
+    const ms: i64 = 1234567890 * std.time.ms_per_s;
+    var ts = try Timestamp.milliseconds(ms);
+    expect(ts.year == 2009);
+    expect(ts.month == 2);
+    expect(ts.day == 13);
+    expect(ts.hours == 23);
+    expect(ts.minutes == 31);
+    expect(ts.seconds == 30);
+    expect(std.mem.eql(u8, ts.day_name, "Fri"));
+    var buffer: [32]u8 = undefined;
+    const asctime: []u8 = try ts.asctime(buffer[0..]);
+    std.debug.print("asctime={}\n", .{asctime});
+    expect(std.mem.eql(u8, asctime, "Fri, 13 Feb 2009 23:31:30 GMT"));
+}
+
+test "unix time 1600000000 is 2020-09-13T12:26:40 UTC" {
     const expect = std.testing.expect;
     const ms: i64 = 1600000000 * std.time.ms_per_s;
-    var ts = Timestamp.milliseconds(ms);
+    var ts = try Timestamp.milliseconds(ms);
     expect(ts.year == 2020);
     expect(ts.month == 9);
     expect(ts.day == 13);
     expect(ts.hours == 12);
     expect(ts.minutes == 26);
     expect(ts.seconds == 40);
+    expect(std.mem.eql(u8, ts.day_name, "Sun"));
+    var buffer: [32]u8 = undefined;
+    const asctime: []u8 = try ts.asctime(buffer[0..]);
+    std.debug.print("asctime={}\n", .{asctime});
+    expect(std.mem.eql(u8, asctime, "Sun, 13 Sep 2020 12:26:40 GMT"));
 }
 
 // imports

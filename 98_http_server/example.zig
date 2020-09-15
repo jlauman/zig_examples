@@ -139,11 +139,12 @@ fn parsePath(buffer: []u8, request: []u8) ![]u8 {
 
 fn makeResponse(allocator: *Allocator, code: []const u8, mimeType: []const u8, content: []const u8) ![]const u8 {
     const aprint = std.fmt.allocPrint;
-    const ts = timestamp.Timestamp.now();
+    var ts = try timestamp.Timestamp.now();
     const header1 = try aprint(allocator, "HTTP/1.1 {}", .{code});
     defer allocator.free(header1);
     // const header2 = try aprint(allocator, "Date: {}", .{std.time.milliTimestamp()});
-    const header2 = try aprint(allocator, "Date: {}-{}-{}T{}:{}:{}", .{ ts.year, ts.month, ts.day, ts.hours, ts.minutes, ts.seconds });
+    var header2buf: [32]u8 = undefined;
+    const header2 = try aprint(allocator, "Date: {}", .{ts.asctime(header2buf[0..])});
     defer allocator.free(header2);
     const header3 = try aprint(allocator, "Content-Type: {}", .{mimeType});
     defer allocator.free(header3);
