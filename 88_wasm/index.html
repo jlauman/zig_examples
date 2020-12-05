@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="utf-8">
+  <title>Hello3</title>
+</head>
+
+<body>
+  <p>Open the JavaScript console!</p>
+  <script>
+    function breakpoint(debug, message) {
+      if (debug) {
+        console.log(message);
+        debugger;
+      }
+      return debug;
+    }
+  </script>
+  <script src="browser.js"></script>
+  <script>
+    console.log('ready!');
+    TheWasm.run();
+  </script>
+</body>
+
+</html>
