@@ -7,7 +7,7 @@ var x: i32 = 42;
 
 pub fn main() !void {
     const file_name = std.fs.path.basename(@src().file);
-    print("\n  main: file={}, x={}\n", .{file_name, x});
+    print("\n  main: file={s}, x={d}\n", .{ file_name, x });
 }
 
 test "use expect for tests" {
