@@ -28,9 +28,9 @@ export fn mul(a: i8, b: i8) i8 {
     return a * b;
 }
 
-// inline forces a function to inlines at all call sites. when it cannot
+// inline forces a function to inline at all call sites. when it cannot
 // be inlined an error is thrown at compile time.
-inline fn div(a: i8, b: i8) i8 {
+fn div(a: i8, b: i8) callconv(.Inline) i8 {
     return @divExact(a, b);
 }
 
