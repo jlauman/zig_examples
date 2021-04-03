@@ -17,21 +17,21 @@ test "primitive type i32" {
     expect(x == 42);
     expect(@TypeOf(x) == i32);
     expect(eql(u8, @typeName(@TypeOf(x)), "i32"));
-    print("  @TypeOf x is {}\n", .{@typeName(@TypeOf(x))});
+    print("  @TypeOf x is {s}\n", .{@typeName(@TypeOf(x))});
 }
 
 test "primitive type bool" {
     expect(b == true);
     expect(@TypeOf(b) == bool);
     expect(eql(u8, @typeName(@TypeOf(b)), "bool"));
-    print("  @TypeOf b is {}\n", .{@typeName(@TypeOf(b))});
+    print("  @TypeOf b is {s}\n", .{@typeName(@TypeOf(b))});
 }
 
 test "string literal type []const u8" {
     expect(eql(u8, s, "hello"));
     expect(@TypeOf(s) == []const u8);
     expect(eql(u8, @typeName(@TypeOf(s)), "[]const u8"));
-    print("  @TypeOf s is {}\n", .{@typeName(@TypeOf(s))});
+    print("  @TypeOf s is {s}\n", .{@typeName(@TypeOf(s))});
 }
 
 // imports
