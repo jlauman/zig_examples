@@ -31,7 +31,7 @@ pub fn main() !void {
     }; // extra crlf required to end headers
     const request = try std.mem.join(allocator, "\r\n", &lines);
     defer allocator.free(request);
-    print("request...\n{}", .{request});
+    print("request...\n{s}", .{request});
     _ = try sock.send(request);
     // try sock.writer().writeAll(request);
 
@@ -45,7 +45,7 @@ pub fn main() !void {
     defer allocator.free(buffer);
     const bytes_read = try sock.receive(buffer);
     const response = buffer[0..bytes_read];
-    print("response...\n{}", .{response});
+    print("response...\n{s}", .{response});
 }
 
 // imports
